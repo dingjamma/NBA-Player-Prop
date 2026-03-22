@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+data/
+logs/
+*.parquet
+*.log
+.DS_Store
+
+# Claude Code
+.claude/
+
+# Misc
+output.json
