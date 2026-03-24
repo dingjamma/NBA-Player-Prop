@@ -1,11 +1,11 @@
 """
-Crawl tomorrow's NBA schedule via ESPN's public API.
+Crawl today's NBA schedule via ESPN's public API.
 Filters for San Antonio Spurs games only.
 No API key needed.
 """
 
 import time
-from datetime import date, timedelta
+from datetime import date
 
 import requests
 import pandas as pd
@@ -16,8 +16,8 @@ ESPN_URL  = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreb
 SPURS_ABV = "SA"
 
 
-def get_tomorrow() -> date:
-    return date.today() + timedelta(days=1)
+def get_today() -> date:
+    return date.today()
 
 
 def fetch_games(target_date: date, retries: int = 3) -> pd.DataFrame:
@@ -54,12 +54,12 @@ def fetch_games(target_date: date, retries: int = 3) -> pd.DataFrame:
 
 
 def run():
-    target = get_tomorrow()
+    target = get_today()
     print(f"Fetching Spurs schedule for {target}")
 
     games = fetch_games(target)
     if games.empty:
-        print("No Spurs games tomorrow.")
+        print("No Spurs games today.")
         return games
 
     print(f"Found {len(games)} Spurs game(s)")

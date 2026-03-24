@@ -43,7 +43,7 @@ def date_iso(d: date) -> str:
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 st.sidebar.header("Settings")
-game_date = st.sidebar.date_input("Game date", value=date.today() + timedelta(days=1))
+game_date = st.sidebar.date_input("Game date", value=date.today())
 st.sidebar.markdown("---")
 st.sidebar.caption("Data refreshes every 5 min")
 if st.sidebar.button("Force refresh"):
@@ -60,6 +60,7 @@ def load_all(game_date_str: str):
     logs  = pd.concat([
         local_parquet("raw/game_logs/player=wembanyama/season=2023-24/data.parquet"),
         local_parquet("raw/game_logs/player=wembanyama/season=2024-25/data.parquet"),
+        local_parquet("raw/game_logs/player=wembanyama/season=2025-26/data.parquet"),
     ], ignore_index=True)
     report_en = local_text(f"reports/final/{game_date_str}/report_en.md")
     report_zh = local_text(f"reports/final/{game_date_str}/report_zh.md")
@@ -209,3 +210,14 @@ with tab4:
                 if url:
                     st.markdown(f"[Read more]({url})")
                 st.caption(f"{row.get('source', '')} — {row.get('published_at', '')[:10]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VIDEO — shown below tabs if it exists for today
+# ══════════════════════════════════════════════════════════════════════════════
+dk_today = date.today().strftime("%Y_%m_%d")
+video_path = Path(f"data/videos/{dk_today}_wemby.mp4")
+if video_path.exists():
+    st.markdown("---")
+    st.markdown("### Today's AI Picks Video")
+    st.video(str(video_path))

@@ -86,7 +86,7 @@ def run():
     tmp = pathlib.Path(tempfile.mktemp(suffix=".parquet"))
     df.to_parquet(tmp, index=False)
     upload_parquet(tmp, f"raw/injuries/date={date_str}/injury_report.parquet")
-    print(f"  Uploaded injury report → S3")
+    print(f"  Uploaded injury report -> S3")
 
     return df
 

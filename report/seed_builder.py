@@ -187,7 +187,7 @@ def build(
 
     s3_key = f"reports/seed/{date_str}/seed.md"
     upload_text(content, s3_key)
-    print(f"  Seed file → {local_path} ({len(content):,} chars)")
-    print(f"  Uploaded seed → s3://{s3_key}")
+    print(f"  Seed file -> {local_path} ({len(content):,} chars)")
+    print(f"  Uploaded seed -> s3://{s3_key}")
 
     return local_path

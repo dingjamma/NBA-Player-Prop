@@ -15,8 +15,18 @@ import pandas as pd
 from ingestion.s3 import upload_parquet
 
 WEMBY_ESPN_ID = 5104157
-SEASONS       = [2024, 2025]   # ESPN uses ending year (2025 = 2024-25)
 LOCAL_OUT     = Path("data/raw/game_logs")
+
+# ESPN uses the ending year of the season (2026 = 2025-26).
+# Dynamically resolve so this never needs to be updated manually.
+def _current_espn_seasons() -> list[int]:
+    from datetime import date
+    today = date.today()
+    # NBA season crosses calendar years: new season starts in Oct
+    current = today.year if today.month <= 9 else today.year + 1
+    return [current, current - 1]
+
+SEASONS = _current_espn_seasons()
 
 ESPN_GAMELOG  = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{player_id}/gamelog"
 
@@ -34,12 +44,13 @@ def fetch_gamelog(player_id: int, season: int) -> pd.DataFrame:
     events_meta = data.get("events", {})
 
     # Collect stats per event from all season type categories
+    ALLOWED_SEASON_TYPES = {"regular season", "playoffs", "postseason"}
+
     stats_map = {}
     for stype in data.get("seasonTypes", []):
-        # skip All-Star (first two events in 2025 are All-Star)
-        display = stype.get("displayName", "")
-        if "star" in display.lower():
-            continue
+        display = stype.get("displayName", "").lower()
+        if not any(a in display for a in ALLOWED_SEASON_TYPES):
+            continue  # skip preseason, All-Star, international exhibitions
         for cat in stype.get("categories", []):
             for entry in cat.get("events", []):
                 eid  = str(entry.get("eventId"))

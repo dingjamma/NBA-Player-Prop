@@ -121,7 +121,7 @@ def run() -> pd.DataFrame:
     tmp = pathlib.Path(tempfile.mktemp(suffix=".parquet"))
     df.to_parquet(tmp, index=False)
     upload_parquet(tmp, f"raw/odds/date={date_str}/props.parquet")
-    print(f"  Uploaded prop lines → S3")
+    print(f"  Uploaded prop lines -> S3")
 
     return df
 

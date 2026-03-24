@@ -43,8 +43,11 @@ def load_encoder():
 
 def fetch_recent_logs(n_games: int = LOOKBACK_GAMES) -> pd.DataFrame:
     """Fetch Wemby's last N games from ESPN."""
+    today = date.today()
+    current_espn_season = today.year if today.month <= 9 else today.year + 1
+
     all_rows = []
-    for season in [2025, 2024]:
+    for season in [current_espn_season, current_espn_season - 1]:
         resp = requests.get(
             ESPN_GAMELOG.format(player_id=WEMBY_ESPN_ID),
             params={"season": season},
@@ -57,9 +60,10 @@ def fetch_recent_logs(n_games: int = LOOKBACK_GAMES) -> pd.DataFrame:
         events_meta = data.get("events", {})
         stats_map   = {}
 
+        allowed = {"regular season", "playoffs", "postseason"}
         for stype in data.get("seasonTypes", []):
-            if "star" in stype.get("displayName", "").lower():
-                continue
+            if not any(a in stype.get("displayName", "").lower() for a in allowed):
+                continue  # skip preseason, All-Star, international exhibitions
             for cat in stype.get("categories", []):
                 for entry in cat.get("events", []):
                     eid  = str(entry.get("eventId"))
@@ -127,7 +131,7 @@ def fetch_recent_logs(n_games: int = LOOKBACK_GAMES) -> pd.DataFrame:
 
 
 def run(games_df: pd.DataFrame = None) -> pd.DataFrame:
-    tomorrow = date.today() + timedelta(days=1)
+    game_date = date.today()
 
     if games_df is None or games_df.empty:
         print("[predict] No games provided, skipping inference.")
@@ -142,7 +146,7 @@ def run(games_df: pd.DataFrame = None) -> pd.DataFrame:
         for _, row in games_df.iterrows()
     )
     if not spurs_playing:
-        print("[predict] Spurs not playing tomorrow, skipping.")
+        print("[predict] Spurs not playing game_date, skipping.")
         return pd.DataFrame()
 
     print("Loading models...")
@@ -165,7 +169,7 @@ def run(games_df: pd.DataFrame = None) -> pd.DataFrame:
     result = {
         "player_id":   str(WEMBY_ESPN_ID),
         "player_name": WEMBY_NAME,
-        "game_date":   str(tomorrow),
+        "game_date":   str(game_date),
     }
     for stat, model in models.items():
         try:
@@ -176,11 +180,11 @@ def run(games_df: pd.DataFrame = None) -> pd.DataFrame:
             result[f"pred_{stat.lower()}"] = None
 
     df = pd.DataFrame([result])
-    print(f"\n  Wemby predictions for {tomorrow}:")
+    print(f"\n  Wemby predictions for {game_date}:")
     for stat in TARGET_STATS:
         print(f"    {stat}: {result.get(f'pred_{stat.lower()}')}")
 
-    date_str = tomorrow.strftime("%Y_%m_%d")
+    date_str = game_date.strftime("%Y_%m_%d")
     tmp = Path(tempfile.mktemp(suffix=".parquet"))
     df.to_parquet(tmp, index=False)
     upload_parquet(tmp, f"processed/predictions/date={date_str}/predictions.parquet")

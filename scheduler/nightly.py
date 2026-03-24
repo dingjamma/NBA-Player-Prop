@@ -30,44 +30,42 @@ def run_pipeline():
 
 def _run():
     # Step 1: Schedule
-    print("\n[1/7] Fetching tomorrow's schedule...")
+    print("\n[1/6] Fetching today's schedule...")
     from crawlers.schedule_crawler import run as crawl_schedule
     games = crawl_schedule()
     if games is None or games.empty:
-        print("  No Spurs game tomorrow. Pipeline exiting early.")
+        print("  No Spurs game today. Pipeline exiting early.")
         return
 
     # Step 2: Injuries
-    print("\n[2/7] Fetching injury report...")
+    print("\n[2/6] Fetching injury report...")
     from crawlers.injuries import run as crawl_injuries
     injuries = crawl_injuries()
 
     # Step 3: Prop lines
-    print("\n[3/7] Fetching prop lines...")
+    print("\n[3/6] Fetching prop lines...")
     from crawlers.odds import run as crawl_odds
     odds = crawl_odds()
 
     # Step 4: News
-    print("\n[4/7] Crawling news (last 7 days)...")
+    print("\n[4/6] Crawling news (last 7 days)...")
     from crawlers.news import run as crawl_news
     news = crawl_news()
 
     # Step 5: Model inference
-    print("\n[5/7] Running model inference...")
+    print("\n[5/6] Running model inference...")
     from model.predict import run as run_predictions
     predictions = run_predictions(games)
 
-    # Step 6: Build seed file
-    print("\n[6/7] Building MiroFish seed file...")
-    from report.seed_builder import build as build_seed
-    seed_path = build_seed(predictions, odds, injuries, news)
-
-    # Step 7: Trigger MiroFish (running locally on port 5001)
-    print("\n[7/7] Triggering MiroFish simulation...")
-    mirofish_url = os.getenv("MIROFISH_BASE_URL", "http://localhost:5001")
-    os.environ["MIROFISH_BASE_URL"] = mirofish_url
-    from mirofish.trigger import run as trigger_mirofish
-    trigger_mirofish(seed_path)
+    # Step 6: Generate prediction video (only if Wemby prop lines exist)
+    if odds is not None and not odds.empty:
+        print("\n[6/6] Generating prediction video...")
+        from video.generator import run as generate_video
+        video_path = generate_video(predictions, odds)
+        if video_path:
+            print(f"  Video ready: {video_path}")
+    else:
+        print("\n[6/6] No odds available — skipping video generation.")
 
     print(f"\nPipeline complete — {datetime.now().isoformat()}")
 

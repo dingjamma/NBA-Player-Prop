@@ -65,6 +65,6 @@ def generate(predictions: pd.DataFrame, odds: pd.DataFrame) -> str:
 
     s3_key = f"reports/stats/{date_str}/report.md"
     upload_text(content, s3_key)
-    print(f"  Stats report uploaded → s3://{s3_key}")
+    print(f"  Stats report uploaded -> s3://{s3_key}")
 
     return content
