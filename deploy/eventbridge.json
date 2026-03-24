@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "name": "wemby-pipeline-9am-et",
+      "schedule": "cron(0 13 * * ? *)",
+      "description": "Run nightly pipeline at 9am ET (13:00 UTC)",
+      "input": { "job": "pipeline" }
+    },
+    {
+      "name": "wemby-results-1159pm-mt",
+      "schedule": "cron(59 5 * * ? *)",
+      "description": "Fetch game results at 11:59pm MT (05:59 UTC next day)",
+      "input": { "job": "results" }
+    }
+  ]
+}
