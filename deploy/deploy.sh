@@ -38,7 +38,6 @@ aws lambda get-function --function-name $LAMBDA_NAME --region $AWS_REGION 2>/dev
        --timeout 300 \
        --memory-size 1024 \
        --environment "Variables={
-         ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY,
          ODDS_API_KEY=$ODDS_API_KEY,
          FAL_KEY=$FAL_KEY,
          DATA_DIR=/tmp/data
