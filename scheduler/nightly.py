@@ -5,7 +5,6 @@ Order of operations:
   1. Crawl tomorrow's schedule (skip if no Spurs game)
   2. Crawl injury report
   3. Crawl prop lines (The Odds API)
-  4. Crawl news (last 7 days)
   5. Run model inference (Wemby only)
   6. Build seed file for MiroFish
   7. Trigger MiroFish (http://localhost:5001)
@@ -38,34 +37,29 @@ def _run():
         return
 
     # Step 2: Injuries
-    print("\n[2/6] Fetching injury report...")
+    print("\n[2/4] Fetching injury report...")
     from crawlers.injuries import run as crawl_injuries
-    injuries = crawl_injuries()
+    crawl_injuries()
 
     # Step 3: Prop lines
-    print("\n[3/6] Fetching prop lines...")
+    print("\n[3/4] Fetching prop lines...")
     from crawlers.odds import run as crawl_odds
     odds = crawl_odds()
 
-    # Step 4: News
-    print("\n[4/6] Crawling news (last 7 days)...")
-    from crawlers.news import run as crawl_news
-    news = crawl_news()
-
-    # Step 5: Model inference
-    print("\n[5/6] Running model inference...")
+    # Step 4: Model inference
+    print("\n[4/5] Running model inference...")
     from model.predict import run as run_predictions
     predictions = run_predictions(games)
 
-    # Step 6: Generate prediction video (only if Wemby prop lines exist)
+    # Step 5: Generate prediction video (only if Wemby prop lines exist)
     if odds is not None and not odds.empty:
-        print("\n[6/6] Generating prediction video...")
+        print("\n[5/5] Generating prediction video...")
         from video.generator import run as generate_video
         video_path = generate_video(predictions, odds)
         if video_path:
             print(f"  Video ready: {video_path}")
     else:
-        print("\n[6/6] No odds available — skipping video generation.")
+        print("\n[5/5] No odds available — skipping video generation.")
 
     print(f"\nPipeline complete — {datetime.now().isoformat()}")
 

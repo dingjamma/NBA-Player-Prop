@@ -54,30 +54,19 @@ def fetch_actual_stats(game_date: date) -> dict | None:
 
     date_str = game_date.isoformat()  # "2026-03-23"
 
-    # Walk through events
-    events     = data.get("events", {})
-    categories = data.get("seasonTypes", [])
+    events_dict = data.get("events", {})
+    labels      = data.get("labels", [])  # top-level: ['MIN','FG','FG%','3PT',...]
 
-    # Flatten all stat labels
-    labels = []
-    for st in categories:
-        for cat in st.get("categories", []):
-            for name in cat.get("names", []):
-                labels.append(name)
-        break  # first season type has the label list
-
-    for st in categories:
+    for st in data.get("seasonTypes", []):
         for cat in st.get("categories", []):
             for event in cat.get("events", []):
-                ev_id  = str(event.get("id", ""))
-                ev_date = events.get(ev_id, {}).get("gameDate", "")[:10]
+                ev_id   = str(event.get("eventId", event.get("id", "")))
+                ev_info = events_dict.get(ev_id, {})
+                ev_date = ev_info.get("gameDate", "")[:10]
                 if ev_date != date_str:
                     continue
                 stats_raw = event.get("stats", [])
-                row = {}
-                for i, val in enumerate(stats_raw):
-                    if i < len(labels):
-                        row[labels[i]] = val
+                row = dict(zip(labels, stats_raw))
                 if row:
                     return _parse_stats(row)
 
@@ -86,11 +75,19 @@ def fetch_actual_stats(game_date: date) -> dict | None:
 
 
 def _parse_stats(raw: dict) -> dict:
-    """Map ESPN stat keys → our keys."""
+    """Map ESPN stat keys -> our keys."""
     def _f(key: str) -> float | None:
         v = raw.get(key)
+        if v in (None, "--", ""):
+            return None
+        # Handle "made-attempted" format e.g. "2-7" -> 2.0
+        if isinstance(v, str) and "-" in v:
+            try:
+                return float(v.split("-")[0])
+            except Exception:
+                return None
         try:
-            return float(v) if v not in (None, "--", "") else None
+            return float(v)
         except Exception:
             return None
 
@@ -100,7 +97,7 @@ def _parse_stats(raw: dict) -> dict:
         "AST":  _f("AST"),
         "STL":  _f("STL"),
         "BLK":  _f("BLK"),
-        "FG3M": _f("3PM"),
+        "FG3M": _f("3PT"),  # ESPN label is "3PT" in "made-attempted" format
     }
 
 
@@ -117,6 +114,10 @@ def load_odds(game_date: date) -> pd.DataFrame:
 
 
 def get_vegas_lines(odds: pd.DataFrame) -> dict:
+    # Filter to Wemby only first
+    if not odds.empty and "player_name" in odds.columns:
+        odds = odds[odds["player_name"].str.lower().str.contains("wembanyama|wemby", na=False)]
+
     lines = {}
     for market, stat in MARKET_TO_STAT.items():
         rows = odds[odds["market"] == market] if not odds.empty else pd.DataFrame()
