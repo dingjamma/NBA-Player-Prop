@@ -62,14 +62,12 @@ def load_all(game_date_str: str):
         local_parquet("raw/game_logs/player=wembanyama/season=2024-25/data.parquet"),
         local_parquet("raw/game_logs/player=wembanyama/season=2025-26/data.parquet"),
     ], ignore_index=True)
-    report_en = local_text(f"reports/final/{game_date_str}/report_en.md")
-    report_zh = local_text(f"reports/final/{game_date_str}/report_zh.md")
     if not odds.empty and "player_name" in odds.columns:
         odds = odds[odds["player_name"].str.contains("Wembanyama", na=False)]
-    return preds, odds, news, sched, logs, report_en, report_zh
+    return preds, odds, news, sched, logs
 
 
-preds, odds, news, sched, logs, report_en, report_zh = load_all(date_iso(game_date))
+preds, odds, news, sched, logs = load_all(date_iso(game_date))
 
 # Figure out opponent
 opp = None
@@ -80,7 +78,7 @@ if not sched.empty:
     opp  = away if home == "SA" else home
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Predictions", "📜 MiroFish Report", "📈 History", "📰 News"])
+tab1, tab3, tab4 = st.tabs(["📊 Predictions", "📈 History", "📰 News"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -149,22 +147,7 @@ with tab1:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — MiroFish Report
-# ══════════════════════════════════════════════════════════════════════════════
-with tab2:
-    if not report_en and not report_zh:
-        st.info("MiroFish report not yet generated for this date. It will appear after the nightly pipeline completes.")
-    else:
-        lang = st.radio("Language", ["English", "Chinese"], horizontal=True)
-        report = report_en if lang == "English" else report_zh
-        if report:
-            st.markdown(report)
-        else:
-            st.info(f"{lang} report not available.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — History
+# TAB 2 — History
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     if logs.empty:

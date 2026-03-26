@@ -1,12 +1,13 @@
 """
-One-time crawl: Victor Wembanyama game logs via ESPN's public API.
-No API key needed.
+Crawl Victor Wembanyama game logs via stats.nba.com.
+No API key needed — just requires browser-like headers.
 
-Run once:
+Run:
     python -m crawlers.historical
 """
 
 import time
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -14,121 +15,100 @@ import pandas as pd
 
 from ingestion.s3 import upload_parquet
 
-WEMBY_ESPN_ID = 5104157
-LOCAL_OUT     = Path("data/raw/game_logs")
+WEMBY_NBA_ID = 1641705
+LOCAL_OUT    = Path("data/raw/game_logs")
 
-# ESPN uses the ending year of the season (2026 = 2025-26).
-# Dynamically resolve so this never needs to be updated manually.
-def _current_espn_seasons() -> list[int]:
-    from datetime import date
+NBA_HEADERS = {
+    "Host":              "stats.nba.com",
+    "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept":            "application/json, text/plain, */*",
+    "Accept-Language":   "en-US,en;q=0.9",
+    "Accept-Encoding":   "gzip, deflate, br",
+    "x-nba-stats-origin":"stats",
+    "x-nba-stats-token": "true",
+    "Referer":           "https://stats.nba.com/",
+    "Connection":        "keep-alive",
+}
+
+GAMELOG_URL = "https://stats.nba.com/stats/playergamelog"
+
+
+def _current_seasons() -> list[str]:
     today = date.today()
-    # NBA season crosses calendar years: new season starts in Oct
-    current = today.year if today.month <= 9 else today.year + 1
-    return [current, current - 1]
-
-SEASONS = _current_espn_seasons()
-
-ESPN_GAMELOG  = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{player_id}/gamelog"
+    current_end = today.year if today.month <= 9 else today.year + 1
+    seasons = []
+    for end in [current_end, current_end - 1, current_end - 2]:
+        seasons.append(f"{end-1}-{str(end)[2:]}")
+    return seasons
 
 
-def fetch_gamelog(player_id: int, season: int) -> pd.DataFrame:
+def fetch_gamelog(player_id: int, season: str) -> pd.DataFrame:
+    """Fetch game log from stats.nba.com for one season."""
     resp = requests.get(
-        ESPN_GAMELOG.format(player_id=player_id),
-        params={"season": season},
+        GAMELOG_URL,
+        headers=NBA_HEADERS,
+        params={
+            "PlayerID":   player_id,
+            "Season":     season,
+            "SeasonType": "Regular Season",
+        },
         timeout=30,
     )
     resp.raise_for_status()
-    data = resp.json()
+    data     = resp.json()
+    result   = data["resultSets"][0]
+    cols     = result["headers"]
+    rows     = result["rowSet"]
 
-    stat_names = data.get("names", [])
-    events_meta = data.get("events", {})
+    if not rows:
+        return pd.DataFrame()
 
-    # Collect stats per event from all season type categories
-    ALLOWED_SEASON_TYPES = {"regular season", "playoffs", "postseason"}
+    df = pd.DataFrame(rows, columns=cols)
 
-    stats_map = {}
-    for stype in data.get("seasonTypes", []):
-        display = stype.get("displayName", "").lower()
-        if not any(a in display for a in ALLOWED_SEASON_TYPES):
-            continue  # skip preseason, All-Star, international exhibitions
-        for cat in stype.get("categories", []):
-            for entry in cat.get("events", []):
-                eid  = str(entry.get("eventId"))
-                vals = entry.get("stats", [])
-                stats_map[eid] = dict(zip(stat_names, vals))
+    # Normalize to our schema
+    df = df.rename(columns={"Player_ID": "PLAYER_ID", "Game_ID": "GAME_ID"})
+    df["GAME_DATE"]   = pd.to_datetime(df["GAME_DATE"]).dt.strftime("%Y-%m-%d")
+    df["PLAYER_NAME"] = "Victor Wembanyama"
+    df["SEASON"]      = season
 
-    rows = []
-    for eid, stats in stats_map.items():
-        meta = events_meta.get(eid, {})
-        game_date = meta.get("gameDate", "")[:10]
-        if not game_date:
-            continue
-
-        def split_stat(key):
-            """Handle combined stats like '5-7' -> return first number."""
-            val = stats.get(key, None)
-            if val is None:
-                return None
-            if isinstance(val, str) and "-" in val:
-                return pd.to_numeric(val.split("-")[0], errors="coerce")
-            return pd.to_numeric(val, errors="coerce")
-
-        rows.append({
-            "GAME_ID":    eid,
-            "GAME_DATE":  game_date,
-            "OPP":        meta.get("opponent", {}).get("abbreviation", ""),
-            "HOME_AWAY":  "away" if meta.get("atVs") == "@" else "home",
-            "WL":         meta.get("gameResult", ""),
-            "MIN":        stats.get("minutes"),
-            "PTS":        pd.to_numeric(stats.get("points"), errors="coerce"),
-            "REB":        pd.to_numeric(stats.get("totalRebounds"), errors="coerce"),
-            "AST":        pd.to_numeric(stats.get("assists"), errors="coerce"),
-            "STL":        pd.to_numeric(stats.get("steals"), errors="coerce"),
-            "BLK":        pd.to_numeric(stats.get("blocks"), errors="coerce"),
-            "FGM":        split_stat("fieldGoalsMade-fieldGoalsAttempted"),
-            "FGA":        pd.to_numeric(stats.get("fieldGoalsAttempted") or (stats.get("fieldGoalsMade-fieldGoalsAttempted") or "").split("-")[-1] if stats.get("fieldGoalsMade-fieldGoalsAttempted") else None, errors="coerce"),
-            "FG3M":       split_stat("threePointFieldGoalsMade-threePointFieldGoalsAttempted"),
-            "FG3A":       pd.to_numeric((stats.get("threePointFieldGoalsMade-threePointFieldGoalsAttempted") or "").split("-")[-1] if stats.get("threePointFieldGoalsMade-threePointFieldGoalsAttempted") else None, errors="coerce"),
-            "FTM":        split_stat("freeThrowsMade-freeThrowsAttempted"),
-            "FTA":        pd.to_numeric((stats.get("freeThrowsMade-freeThrowsAttempted") or "").split("-")[-1] if stats.get("freeThrowsMade-freeThrowsAttempted") else None, errors="coerce"),
-            "TOV":        pd.to_numeric(stats.get("turnovers"), errors="coerce"),
-            "PF":         pd.to_numeric(stats.get("fouls"), errors="coerce"),
-            "PLAYER_ID":   str(player_id),
-            "PLAYER_NAME": "Victor Wembanyama",
-            "SEASON":      f"{season-1}-{str(season)[2:]}",
-        })
-
-    df = pd.DataFrame(rows).sort_values("GAME_DATE").reset_index(drop=True)
+    keep = ["GAME_ID", "GAME_DATE", "MATCHUP", "WL", "MIN",
+            "FGM", "FGA", "FG3M", "FG3A", "FTM", "FTA",
+            "OREB", "DREB", "REB", "AST", "STL", "BLK",
+            "TOV", "PF", "PTS", "PLUS_MINUS",
+            "PLAYER_ID", "PLAYER_NAME", "SEASON"]
+    df = df[[c for c in keep if c in df.columns]]
+    df = df.sort_values("GAME_DATE").reset_index(drop=True)
     return df
 
 
 def run():
     LOCAL_OUT.mkdir(parents=True, exist_ok=True)
+    seasons = _current_seasons()
 
-    for season in SEASONS:
-        season_str = f"{season-1}-{str(season)[2:]}"
-        print(f"\n=== Season {season_str} ===")
+    for season in seasons:
+        print(f"\n=== Season {season} ===")
         try:
-            df = fetch_gamelog(WEMBY_ESPN_ID, season)
+            df = fetch_gamelog(WEMBY_NBA_ID, season)
             print(f"  Fetched {len(df)} games")
             if df.empty:
                 print("  No data, skipping.")
                 continue
-            print(f"  Sample: {df[['GAME_DATE','PTS','REB','AST']].tail(3).to_string()}")
+            print(f"  Sample:\n{df[['GAME_DATE','PTS','REB','AST','PLUS_MINUS']].tail(3).to_string()}")
         except Exception as e:
             import traceback; traceback.print_exc()
             print(f"  [ERROR] {e}")
             continue
 
-        local_path = LOCAL_OUT / f"wemby_{season_str.replace('-', '_')}.parquet"
+        season_tag   = season.replace("-", "_")
+        local_path   = LOCAL_OUT / f"wemby_{season_tag}.parquet"
         df.to_parquet(local_path, index=False)
         print(f"  Saved -> {local_path}")
 
-        s3_key = f"raw/game_logs/player=wembanyama/season={season_str}/data.parquet"
+        s3_key = f"raw/game_logs/player=wembanyama/season={season}/data.parquet"
         upload_parquet(local_path, s3_key)
         print(f"  Uploaded -> s3://{s3_key}")
 
-        time.sleep(2)
+        time.sleep(1)
 
 
 if __name__ == "__main__":

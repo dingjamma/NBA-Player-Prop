@@ -18,7 +18,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
-STAT_COLS = ["PTS", "REB", "AST", "STL", "BLK", "FG3M", "MIN", "TOV", "FGA", "FTA"]
+STAT_COLS = ["PTS", "REB", "AST", "STL", "BLK", "FG3M", "MIN", "TOV", "FGA", "FTA", "PLUS_MINUS"]
 ROLL_WINDOWS = [5, 10]
 TARGET_STATS = ["PTS", "REB", "AST", "STL", "BLK", "FG3M"]
 

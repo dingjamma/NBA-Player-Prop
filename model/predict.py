@@ -21,10 +21,19 @@ from ingestion.s3 import _client, BUCKET, upload_parquet
 from model.features import build_features, get_feature_cols, TARGET_STATS
 
 
-WEMBY_ESPN_ID  = 5104157
+WEMBY_NBA_ID   = 1641705
 WEMBY_NAME     = "Victor Wembanyama"
 LOOKBACK_GAMES = 20
-ESPN_GAMELOG   = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{player_id}/gamelog"
+NBA_GAMELOG    = "https://stats.nba.com/stats/playergamelog"
+NBA_HEADERS    = {
+    "Host":               "stats.nba.com",
+    "User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept":             "application/json, text/plain, */*",
+    "Accept-Language":    "en-US,en;q=0.9",
+    "x-nba-stats-origin": "stats",
+    "x-nba-stats-token":  "true",
+    "Referer":            "https://stats.nba.com/",
+}
 
 
 def load_model(stat: str) -> xgb.XGBRegressor:
@@ -42,89 +51,43 @@ def load_encoder():
 
 
 def fetch_recent_logs(n_games: int = LOOKBACK_GAMES) -> pd.DataFrame:
-    """Fetch Wemby's last N games from ESPN."""
+    """Fetch Wemby's last N games from stats.nba.com."""
     today = date.today()
-    current_espn_season = today.year if today.month <= 9 else today.year + 1
+    current_end = today.year if today.month <= 9 else today.year + 1
+    seasons = [f"{current_end-1}-{str(current_end)[2:]}",
+               f"{current_end-2}-{str(current_end-1)[2:]}"]
 
-    all_rows = []
-    for season in [current_espn_season, current_espn_season - 1]:
-        resp = requests.get(
-            ESPN_GAMELOG.format(player_id=WEMBY_ESPN_ID),
-            params={"season": season},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        stat_names  = data.get("names", [])
-        events_meta = data.get("events", {})
-        stats_map   = {}
-
-        allowed = {"regular season", "playoffs", "postseason"}
-        for stype in data.get("seasonTypes", []):
-            if not any(a in stype.get("displayName", "").lower() for a in allowed):
-                continue  # skip preseason, All-Star, international exhibitions
-            for cat in stype.get("categories", []):
-                for entry in cat.get("events", []):
-                    eid  = str(entry.get("eventId"))
-                    vals = entry.get("stats", [])
-                    stats_map[eid] = dict(zip(stat_names, vals))
-
-        for eid, stats in stats_map.items():
-            meta = events_meta.get(eid, {})
-            game_date = meta.get("gameDate", "")[:10]
-            if not game_date:
+    frames = []
+    for season in seasons:
+        try:
+            resp = requests.get(
+                NBA_GAMELOG,
+                headers=NBA_HEADERS,
+                params={"PlayerID": WEMBY_NBA_ID, "Season": season, "SeasonType": "Regular Season"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            result = resp.json()["resultSets"][0]
+            cols   = result["headers"]
+            rows   = result["rowSet"]
+            if not rows:
                 continue
-
-            def split_first(key):
-                val = stats.get(key)
-                if val is None:
-                    return None
-                if isinstance(val, str) and "-" in val:
-                    return pd.to_numeric(val.split("-")[0], errors="coerce")
-                return pd.to_numeric(val, errors="coerce")
-
-            def split_last(key):
-                val = stats.get(key)
-                if val is None:
-                    return None
-                if isinstance(val, str) and "-" in val:
-                    return pd.to_numeric(val.split("-")[-1], errors="coerce")
-                return pd.to_numeric(val, errors="coerce")
-
-            all_rows.append({
-                "GAME_ID":    eid,
-                "GAME_DATE":  game_date,
-                "OPP":        meta.get("opponent", {}).get("abbreviation", "UNK"),
-                "HOME_AWAY":  "away" if meta.get("atVs") == "@" else "home",
-                "WL":         meta.get("gameResult", ""),
-                "MIN":        stats.get("minutes"),
-                "PTS":        pd.to_numeric(stats.get("points"), errors="coerce"),
-                "REB":        pd.to_numeric(stats.get("totalRebounds"), errors="coerce"),
-                "AST":        pd.to_numeric(stats.get("assists"), errors="coerce"),
-                "STL":        pd.to_numeric(stats.get("steals"), errors="coerce"),
-                "BLK":        pd.to_numeric(stats.get("blocks"), errors="coerce"),
-                "FGM":        split_first("fieldGoalsMade-fieldGoalsAttempted"),
-                "FGA":        split_last("fieldGoalsMade-fieldGoalsAttempted"),
-                "FG3M":       split_first("threePointFieldGoalsMade-threePointFieldGoalsAttempted"),
-                "FG3A":       split_last("threePointFieldGoalsMade-threePointFieldGoalsAttempted"),
-                "FTM":        split_first("freeThrowsMade-freeThrowsAttempted"),
-                "FTA":        split_last("freeThrowsMade-freeThrowsAttempted"),
-                "TOV":        pd.to_numeric(stats.get("turnovers"), errors="coerce"),
-                "PF":         pd.to_numeric(stats.get("fouls"), errors="coerce"),
-                "PLAYER_ID":   str(WEMBY_ESPN_ID),
-                "PLAYER_NAME": WEMBY_NAME,
-                "SEASON":      f"{season-1}-{str(season)[2:]}",
-            })
-
-        if len(all_rows) >= n_games:
-            break
+            df = pd.DataFrame(rows, columns=cols)
+            df = df.rename(columns={"Player_ID": "PLAYER_ID", "Game_ID": "GAME_ID"})
+            df["GAME_DATE"]   = pd.to_datetime(df["GAME_DATE"]).dt.strftime("%Y-%m-%d")
+            df["PLAYER_NAME"] = WEMBY_NAME
+            df["SEASON"]      = season
+            frames.append(df)
+        except Exception as e:
+            print(f"  [WARN] Failed to fetch season {season}: {e}")
         time.sleep(1)
+        if sum(len(f) for f in frames) >= n_games:
+            break
 
-    if not all_rows:
+    if not frames:
         return pd.DataFrame()
 
-    df = pd.DataFrame(all_rows)
+    df = pd.concat(frames, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])
     df = df.sort_values("GAME_DATE", ascending=False).head(n_games)
     return df
@@ -167,7 +130,7 @@ def run(games_df: pd.DataFrame = None) -> pd.DataFrame:
     X          = last_row[available].values
 
     result = {
-        "player_id":   str(WEMBY_ESPN_ID),
+        "player_id":   str(WEMBY_NBA_ID),
         "player_name": WEMBY_NAME,
         "game_date":   str(game_date),
     }
