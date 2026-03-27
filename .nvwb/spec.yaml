@@ -2,7 +2,7 @@ specVersion: v2
 meta:
   name: NBA Player Prop
   image: project-image
-  description: NBA Player Prop prediction pipeline — daily data ingestion, XGBoost model, video card generation
+  description: NBA Player Prop prediction pipeline — daily ingestion, XGBoost model, video card generation
   labels:
     - sports-analytics
     - machine-learning
@@ -10,22 +10,10 @@ meta:
   createdOn: "2026-03-26T00:00:00Z"
   defaultBranch: master
 layout:
-  - path: crawlers/
-    storage: workspace
-  - path: ingestion/
-    storage: workspace
-  - path: model/
-    storage: workspace
-  - path: report/
-    storage: workspace
-  - path: video/
-    storage: workspace
-  - path: scheduler/
-    storage: workspace
+  - path: code/
+    storage: git
   - path: data/
-    storage: workspace
-  - path: output.json
-    storage: workspace
+    storage: gitlfs
 environment:
   base: nvcr.io/nvidia/ai-workbench/python-base:1.0.4
   build:
@@ -50,3 +38,9 @@ environment:
           - fal-client==0.5.9
           - Pillow==10.4.0
           - moviepy==1.0.3
+postStartScripts: []
+variables: []
+resources:
+  gpu:
+    requested: 1
+mounts: []
