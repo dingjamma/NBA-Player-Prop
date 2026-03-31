@@ -1,85 +1,140 @@
-# NBA Player Agent Simulation System — Proposal
+# NBA Player Prop Predictor — Expansion Proposal
 
-## North Star
-Each NBA player is an LLM agent with real stats. They "play" against each other in simulation. Run 100-200 games → probability distributions → compare vs Polymarket lines → bet when you have edge.
+## Goal
+Expand from Wemby-only predictions to 5 star players, replace The Odds API with Underdog Fantasy, and clean up dead code from earlier experiments.
 
-## Architecture
-**XGBoost (statistical baseline) + LLM agents (contextual reasoning) = calibrated probabilities**
+**Target players:**
+| Player | Team | Why |
+|--------|------|-----|
+| Victor Wembanyama | SAS | Already working, proven accuracy |
+| Nikola Jokic | DEN | Triple-double machine, consistent stat lines |
+| Luka Doncic | LAL | High usage, predictable volume |
+| Shai Gilgeous-Alexander | OKC | MVP-caliber, steady production |
+| Giannis Antetokounmpo | MIL | Elite stats, reliable floor |
 
-The LLM layer is your edge over the books — it understands "Wemby on a back-to-back against a top defense after a road trip." Pure stats can't reason about that.
-
----
-
-## 4 Phases
-
-### Phase 0 — Data Foundation (Weeks 1-2)
-- Expand crawlers from Wemby-only → all players in tonight's games
-- Add team pace + defensive rating features
-- Build a bet tracking SQLite database (start recording every prediction from day 1)
-
-### Phase 1 — MVP Simulation (Weeks 3-5)
-- `PlayerAgent` class — each player gets a system prompt with their stats, matchup, injury context, anchored to XGBoost predictions
-- `GameOrchestrator` — runs 4 quarters, tracks fouls/blowouts/bench decisions
-- `LLM Client` — wraps Ollama, sequential queue (4080 can only do 1 inference at a time)
-- Run 100 sims → distributions → edge calculator (P_over_simulated vs P_over_implied)
-
-**Reality check on speed:** 40 LLM calls per sim × 3 sec each × 100 sims = ~2 hours. Feasible. Not 1000 sims though — that's 40 hours. Start with 100.
-
-### Phase 2 — Calibration + Polymarket (Weeks 6-8)
-- Backtesting against historical games
-- Calibration layer (your distributions will be wrong at first, fix systematically)
-- Polymarket API client — paper trade for 30 days before real money
-- Risk management — Kelly sizing, daily loss limits
-
-### Phase 3 — Go Live (Weeks 9-12)
-- Lighter model experiments (Qwen 7B for agents, 14B for orchestrator)
-- Live execution only after 30 days paper trading with positive ROI
+These are all high-usage stars with consistent game-to-game stat profiles — exactly what XGBoost handles well.
 
 ---
 
-## Key Decisions
+## 3 Phases
 
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Simulation granularity | Quarter-level (not possession) | 40 LLM calls vs 200+ per sim |
-| LLM | Qwen 2.5 14B local | Already running, free |
-| Stats backbone | Keep XGBoost | LLMs hallucinate numbers without an anchor |
-| MiroFish | Keep for now, retire by Phase 2 | Agent simulation replaces it |
+### Phase 0 — Cleanup (1-2 days)
+
+Remove dead code and unused dependencies from earlier MiroFish/video experiments.
+
+**Remove:**
+- `video/` directory (fal.ai Seedance video generation)
+- `mirofish/` directory (dead since commit 62d4d14)
+- `report/seed_builder.py` (runs but output is unused)
+- `crawlers/news.py` (removed from pipeline in commit 1959af0)
+- Dead deps from `requirements.txt`: `fal-client`, `moviepy`, `Pillow`, `feedparser`, `openai`, `schedule`, `nba_api`
+- MiroFish/.env keys: `MIROFISH_BASE_URL`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL_NAME`, `ZEP_API_KEY`, `FAL_KEY`
+
+**Update:**
+- `README.md` to reflect current state (no video, no MiroFish)
+- `.env.example` to remove dead keys
+- `scheduler/nightly.py` to remove video generation step
+- `dashboard.py` to remove video player
+
+**Success criteria:**
+- [ ] No dead imports or unused files
+- [ ] `pip install -r requirements.txt` installs only what's needed
+- [ ] Pipeline still runs end-to-end for Wemby
 
 ---
 
-## New Directory Structure
+### Phase 1 — Underdog Fantasy Integration (3-5 days)
+
+Replace The Odds API with Underdog Fantasy API for prop lines.
+
+**Why switch:**
+- Underdog is the primary platform we care about
+- Lines come directly from where bets are placed — no translation needed
+- The Odds API free tier (500 req/month) is limiting
+
+**Tasks:**
+- [ ] Research Underdog Fantasy API (auth, endpoints, rate limits)
+- [ ] Build `crawlers/underdog.py` — fetch player prop lines for target players
+- [ ] Map Underdog stat categories to our 6 targets (PTS, REB, AST, STL, BLK, FG3M)
+- [ ] Update `scheduler/nightly.py` to call Underdog instead of The Odds API
+- [ ] Update dashboard to show Underdog lines instead of multi-book median
+- [ ] Keep `crawlers/odds.py` as fallback but remove from default pipeline
+
+**Success criteria:**
+- [ ] Nightly pipeline fetches Underdog lines for all 5 players
+- [ ] Dashboard shows Underdog line vs model prediction
+
+---
+
+### Phase 2 — Expand to 5 Players (1-2 weeks)
+
+Generalize everything from Wemby-only to N players.
+
+**Crawlers:**
+- [ ] `crawlers/historical.py` — accept a player ID list, fetch game logs for all 5 players
+- [ ] `crawlers/schedule_crawler.py` — check if ANY of the 5 players' teams play today (not just Spurs)
+
+**Feature engineering:**
+- [ ] `model/features.py` — same 45-feature pipeline, parameterized by player
+- [ ] Each player gets their own rolling averages, opponent history, rest days, etc.
+- [ ] Consider adding player-specific features (e.g., Jokic assist rate is more predictive than Giannis's)
+
+**Model training:**
+- [ ] Train 6 XGBoost models PER player (30 models total)
+- [ ] Store as `data/models/{player_id}/{PTS,REB,AST,STL,BLK,FG3M}/model.json`
+- [ ] Validate with time-series CV, compare MAE across players
+- [ ] Players with fewer seasons of data (Wemby) vs more (Jokic) may need different hyperparameters
+
+**Inference:**
+- [ ] `model/predict.py` — loop over all players with games today, run their models
+- [ ] Save predictions keyed by player + date
+
+**Dashboard:**
+- [ ] Player selector dropdown (or show all 5)
+- [ ] Per-player predictions vs Underdog lines
+- [ ] Per-player career history + rolling averages
+
+**Success criteria:**
+- [ ] Models trained for all 5 players with MAE comparable to Wemby's
+- [ ] Nightly pipeline produces predictions for every player with a game that day
+- [ ] Dashboard shows all 5 players
+
+---
+
+## Updated Directory Structure
 
 ```
 NBA-Player-Prop/
 ├── crawlers/
-│   ├── player_logs.py         (new — Phase 0)
-│   └── team_stats.py          (new — Phase 0)
+│   ├── schedule_crawler.py   ← check if any target player's team plays
+│   ├── injuries.py           ← NBA injury report (unchanged)
+│   ├── underdog.py           ← NEW: Underdog Fantasy prop lines
+│   ├── odds.py               ← KEPT as fallback, not in default pipeline
+│   └── historical.py         ← MODIFIED: multi-player game log fetch
 ├── model/
-│   ├── features.py            (modify — Phase 0)
-│   ├── train.py               (modify — Phase 0)
-│   └── predict.py             (modify — Phase 0)
-├── simulation/                (new — Phase 1)
-│   ├── agents/
-│   │   ├── player_agent.py
-│   │   └── prompts.py
-│   ├── orchestrator.py
-│   ├── runner.py
-│   ├── llm_client.py
-│   ├── edge.py
-│   ├── calibrator.py          (Phase 2)
-│   └── models.py
-├── execution/                 (new — Phase 2)
-│   ├── polymarket.py
-│   └── risk.py
-├── tracking/                  (new — Phase 0)
-│   ├── tracker.py
-│   └── schema.py
-├── backtest/                  (new — Phase 2)
-│   ├── runner.py
-│   └── metrics.py
-└── docs/
-    └── PROPOSAL_agent_simulation.md
+│   ├── features.py           ← MODIFIED: parameterized by player
+│   ├── train.py              ← MODIFIED: train per player
+│   └── predict.py            ← MODIFIED: predict for all players with games today
+├── report/
+│   └── stats_report.py       ← quick stats (unchanged)
+├── ingestion/
+│   └── s3.py                 ← local file store (unchanged)
+├── scheduler/
+│   └── nightly.py            ← MODIFIED: multi-player pipeline
+├── dashboard.py              ← MODIFIED: multi-player UI
+├── run_nightly.py            ← entry point (unchanged)
+├── fetch_results.py          ← MODIFIED: track results for all 5 players
+├── config.py                 ← NEW: player roster + IDs
+└── data/
+    ├── raw/
+    │   ├── odds/             ← Underdog lines by date
+    │   └── gamelogs/         ← per-player historical data
+    ├── processed/
+    │   └── predictions/      ← per-player predictions by date
+    ├── models/
+    │   └── {player_id}/      ← 6 models per player
+    └── results/
+        └── results.csv       ← actuals vs predictions for all players
 ```
 
 ---
@@ -88,43 +143,56 @@ NBA-Player-Prop/
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| LLM produces uncalibrated distributions | High | Calibration layer + always ensemble with XGBoost |
-| 100 sims insufficient for stable distributions | Medium | Bootstrap confidence intervals, add cloud GPU if needed |
-| Polymarket NBA markets have low liquidity | High | Check depth before placing, use limit orders |
-| Simulation takes too long for nightly window | Medium | Start pipeline at 8 PM, run sims right after lineups announced |
-| Edge disappears when lines move | Medium | Fetch lines at 6 PM, 8 PM, 10 PM — only bet stable edges |
-
----
-
-## Success Criteria
-
-### Phase 0
-- [ ] XGBoost predictions for all starters in tonight's games
-- [ ] Team pace and defensive rating features added
-- [ ] Bet tracking database recording every prediction
-
-### Phase 1
-- [ ] 100 simulations complete in under 3 hours on local hardware
-- [ ] Stat distributions with mean, std, and percentiles per player
-- [ ] Edge calculator flags bets with >5% edge
-- [ ] Nightly pipeline runs end-to-end without manual intervention
-
-### Phase 2
-- [ ] Backtesting over 50+ historical games shows simulation adds value over XGBoost alone
-- [ ] Calibration brings Brier score below 0.25
-- [ ] 30 days paper trading on Polymarket with logged results
-- [ ] Positive simulated ROI after vig
-
-### Phase 3
-- [ ] Live execution on Polymarket
-- [ ] 30-day rolling ROI of 5%+ after vig
-- [ ] Fully autonomous nightly pipeline through bet execution
+| Underdog API access is restricted or undocumented | High | Research API first in Phase 1; keep The Odds API as fallback |
+| Players with less history (Wemby: 2 seasons) produce weaker models | Medium | Monitor MAE per player; fall back to league averages for sparse features |
+| stats.nba.com rate limits or blocks scraping | Medium | Add request delays, cache aggressively, keep ESPN as backup |
+| 30 models = longer training time | Low | Still fast — XGBoost trains in seconds per model |
+| Schedule crawler misses games (API changes) | Medium | Cross-check with multiple sources; alert on zero-game days during season |
 
 ---
 
 ## What NOT to Build
-- Custom LLM fine-tuning (overkill for now)
-- Real-time in-game betting (too complex)
-- Multi-sport expansion (nail NBA first)
+- LLM agent simulation (overkill — XGBoost is working)
+- Video generation (not needed for personal use)
+- Social media posting / content pipeline
+- Multi-sport expansion (nail 5 NBA players first)
 - Custom frontend (Streamlit is fine)
-- Distributed simulation infrastructure (one machine, sequential)
+- Real-time in-game predictions
+- Betting execution / auto-placing bets
+
+---
+
+## Player Config
+
+```python
+# config.py
+PLAYERS = {
+    "wembanyama": {
+        "name": "Victor Wembanyama",
+        "nba_id": 1641705,
+        "team": "SAS",
+    },
+    "jokic": {
+        "name": "Nikola Jokic",
+        "nba_id": 203999,
+        "team": "DEN",
+    },
+    "doncic": {
+        "name": "Luka Doncic",
+        "nba_id": 1629029,
+        "team": "LAL",
+    },
+    "sga": {
+        "name": "Shai Gilgeous-Alexander",
+        "nba_id": 1628983,
+        "team": "OKC",
+    },
+    "giannis": {
+        "name": "Giannis Antetokounmpo",
+        "nba_id": 203507,
+        "team": "MIL",
+    },
+}
+
+STAT_TARGETS = ["PTS", "REB", "AST", "STL", "BLK", "FG3M"]
+```
