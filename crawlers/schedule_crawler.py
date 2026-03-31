@@ -1,6 +1,6 @@
 """
 Crawl today's NBA schedule via ESPN's public API.
-Filters for San Antonio Spurs games only.
+Filters for games that include any of our 5 tracked players' teams.
 No API key needed.
 """
 
@@ -11,13 +11,9 @@ import requests
 import pandas as pd
 
 from ingestion.s3 import upload_parquet
+from config import TRACKED_TEAMS
 
-ESPN_URL  = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
-SPURS_ABV = "SA"
-
-
-def get_today() -> date:
-    return date.today()
+ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 
 
 def fetch_games(target_date: date, retries: int = 3) -> pd.DataFrame:
@@ -32,18 +28,21 @@ def fetch_games(target_date: date, retries: int = 3) -> pd.DataFrame:
             for event in events:
                 comps = event.get("competitions", [{}])[0]
                 teams = {c["team"]["abbreviation"]: c for c in comps.get("competitors", [])}
-                if SPURS_ABV not in teams:
+
+                # Keep game if any tracked team is playing
+                if not TRACKED_TEAMS.intersection(teams.keys()):
                     continue
+
                 home = next((c for c in comps["competitors"] if c["homeAway"] == "home"), {})
                 away = next((c for c in comps["competitors"] if c["homeAway"] == "away"), {})
                 rows.append({
-                    "GAME_ID":         event.get("id"),
-                    "GAME_DATE":       target_date.isoformat(),
-                    "HOME_TEAM":       home.get("team", {}).get("displayName", ""),
-                    "HOME_TEAM_ABV":   home.get("team", {}).get("abbreviation", ""),
-                    "VISITOR_TEAM":    away.get("team", {}).get("displayName", ""),
-                    "VISITOR_TEAM_ABV": away.get("team", {}).get("abbreviation", ""),
-                    "STATUS":          event.get("status", {}).get("type", {}).get("description", ""),
+                    "GAME_ID":            event.get("id"),
+                    "GAME_DATE":          target_date.isoformat(),
+                    "HOME_TEAM":          home.get("team", {}).get("displayName", ""),
+                    "HOME_TEAM_ABV":      home.get("team", {}).get("abbreviation", ""),
+                    "VISITOR_TEAM":       away.get("team", {}).get("displayName", ""),
+                    "VISITOR_TEAM_ABV":   away.get("team", {}).get("abbreviation", ""),
+                    "STATUS":             event.get("status", {}).get("type", {}).get("description", ""),
                 })
             return pd.DataFrame(rows)
         except Exception as e:
@@ -53,24 +52,24 @@ def fetch_games(target_date: date, retries: int = 3) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def run():
-    target = get_today()
-    print(f"Fetching Spurs schedule for {target}")
+def run() -> pd.DataFrame:
+    target = date.today()
+    print(f"Fetching schedule for {target} (tracked teams: {sorted(TRACKED_TEAMS)})")
 
     games = fetch_games(target)
     if games.empty:
-        print("No Spurs games today.")
+        print("No tracked players have games today.")
         return games
 
-    print(f"Found {len(games)} Spurs game(s)")
-    date_str = target.strftime("%Y_%m_%d")
+    print(f"Found {len(games)} game(s) with tracked players")
 
-    s3_key = f"raw/schedule/date={date_str}/games.parquet"
-    import tempfile, pathlib
-    tmp = pathlib.Path(tempfile.mktemp(suffix=".parquet"))
+    date_str = target.strftime("%Y_%m_%d")
+    import tempfile
+    from pathlib import Path
+    tmp = Path(tempfile.mktemp(suffix=".parquet"))
     games.to_parquet(tmp, index=False)
-    upload_parquet(tmp, s3_key)
-    print(f"Uploaded -> s3://{s3_key}")
+    upload_parquet(tmp, f"raw/schedule/date={date_str}/games.parquet")
+    print(f"Saved -> data/raw/schedule/date={date_str}/games.parquet")
 
     return games
 
